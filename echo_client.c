@@ -4,8 +4,8 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <pthread.h>
 
-#define PORT 8080
 #define BUFFER_SIZE 1024
 
 
@@ -18,6 +18,24 @@ void usage() {
 void ErrorHandling(char *message) {
     perror(message);
     exit(EXIT_FAILURE);
+}
+
+
+void *receive_broadcast(void *arg) {
+    int sock = *((int *)arg);
+    char buffer[BUFFER_SIZE];
+
+    while (1) {
+        memset(buffer, 0x00, BUFFER_SIZE); // 버퍼 초기화
+
+        // 서버로부터 응답을 받음
+        int bytes_received = recv(sock, buffer, BUFFER_SIZE, 0);
+        if (bytes_received <= 0) {
+            ErrorHandling("recv error");
+        }
+        printf("\nBroadcast from server: %s\n", buffer);
+        fflush(stdout);
+    }
 }
 
 
@@ -48,23 +66,35 @@ int main(int argc, char* argv[]) {
         ErrorHandling("Connection Failed");
     }
 
+    // 브로드캐스트를 받는 쓰레드 생성
+    pthread_t thread_id;
+    if (pthread_create(&thread_id, NULL, receive_broadcast, (void *)&sock) != 0) {
+        ErrorHandling("Thread create failed");
+    }
+
     // 서버로부터 메시지를 수신하고 다시 전송
     char buffer[BUFFER_SIZE];
     while (1) {
+        memset(buffer, 0x00, BUFFER_SIZE); // 버퍼 초기화
         printf("Enter message: ");
+        fflush(stdout);
         fgets(buffer, BUFFER_SIZE, stdin);
+        buffer[strcspn(buffer, "\n")] = '\0';
         send(sock, buffer, strlen(buffer), 0);
-        printf("Message sent\n");
+
+        if (strcmp(buffer, "exit") == 0) {
+            printf("disconnect\n");
+            break;
+        } 
 
         // 서버로부터 응답을 받음
-        if (recv(sock, buffer, BUFFER_SIZE, 0) == 0) {
-            printf("Server disconnected\n");
-            break;
+        if (recv(sock, buffer, BUFFER_SIZE, 0) <= 0) {
+            ErrorHandling("recv error");
         }
         printf("Server: %s\n", buffer);
-        memset(buffer, 0, BUFFER_SIZE); // 버퍼 초기화
     }
 
     close(sock); // 소켓 닫기
+
     return 0;
 }
